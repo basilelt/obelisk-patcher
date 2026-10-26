@@ -46,7 +46,8 @@ def cmd_unpack(ab, outdir):
             root = os.path.realpath(outdir)
             for m in t.getmembers():
                 dest = os.path.realpath(os.path.join(outdir, m.name))
-                assert (m.isfile() or m.isdir()) and os.path.commonpath([root, dest]) == root, f"unsafe member {m.name}"
+                if not ((m.isfile() or m.isdir()) and os.path.commonpath([root, dest]) == root):
+                    raise ValueError(f"unsafe member {m.name}")
             t.extractall(outdir)
     header["order"] = order
     with open(os.path.join(outdir, ".ab_header"), "w") as f:
