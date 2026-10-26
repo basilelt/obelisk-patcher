@@ -40,7 +40,14 @@ def cmd_unpack(ab, outdir):
     with tarfile.open(fileobj=io.BytesIO(body)) as t:
         for m in t.getmembers():
             order.append({"name": m.name, "type": m.type.decode(), "mode": m.mode, "uid": m.uid, "gid": m.gid, "mtime": m.mtime})
-        t.extractall(outdir, filter="data")
+        if hasattr(tarfile, "data_filter"):
+            t.extractall(outdir, filter="data")
+        else:  # Python < 3.12 without the backport (e.g. macOS's 3.9): reject links / escaping paths by hand
+            root = os.path.realpath(outdir)
+            for m in t.getmembers():
+                dest = os.path.realpath(os.path.join(outdir, m.name))
+                assert (m.isfile() or m.isdir()) and os.path.commonpath([root, dest]) == root, f"unsafe member {m.name}"
+            t.extractall(outdir)
     header["order"] = order
     with open(os.path.join(outdir, ".ab_header"), "w") as f:
         json.dump(header, f, indent=1)
