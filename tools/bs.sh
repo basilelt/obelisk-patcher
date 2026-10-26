@@ -15,19 +15,23 @@
 # Config via environment (all optional):
 #   ADB      path to the adb binary (default: adb on PATH). On WSL targeting
 #            Windows BlueStacks, point this at the Windows adb.exe.
-#   SERIAL   adb device serial (default: 127.0.0.1:5555 for a local emulator).
+#   SERIAL   adb device serial (default: none, adb picks the only attached device;
+#            e.g. 127.0.0.1:5555 for a local emulator).
 #   XFER     a directory both this shell and adb can read/write. On WSL+Windows
 #            this must be a Windows path (adb.exe can't see WSL paths); set XFER
 #            to its /mnt/c/... form and XFER_NATIVE to its C:\... form.
 set -u
 A="${ADB:-adb}"
-B="-s ${SERIAL:-127.0.0.1:5555}"
+B="${SERIAL:+-s $SERIAL}"
 PKG=com.checkbox.minershminer
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 WIN="${XFER:-$HERE/saves/xfer}"
 WINP="${XFER_NATIVE:-$WIN}"
 SEP="${XFER_SEP:-/}"  # set to a backslash when XFER_NATIVE is a Windows C:\... path
 mkdir -p "$WIN" "$HERE/saves"
+
+# macOS has no coreutils timeout; perl alarm is a drop-in.
+command -v timeout >/dev/null || timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }
 
 adb() { timeout 60 $A $B "$@"; }
 
@@ -57,7 +61,7 @@ case "${1:-}" in
     n=$2; rm -f "$WIN/$n.ab"
     ( timeout 180 $A $B backup -f "$WINP$SEP$n.ab" -noapk $PKG > "$HERE/saves/$n.backup.log" 2>&1 & )
     tap_button 'back up my data'
-    for i in $(seq 1 30); do sleep 2; [ -s "$WIN/$n.ab" ] && [ "$(stat -c %s "$WIN/$n.ab")" -gt 1000 ] && break; done
+    for i in $(seq 1 30); do sleep 2; [ -s "$WIN/$n.ab" ] && [ "$(wc -c < "$WIN/$n.ab")" -gt 1000 ] && break; done
     sleep 2; cp "$WIN/$n.ab" "$HERE/saves/$n.ab" && rm -rf "$HERE/saves/$n" && python3 -I "$HERE/tools/abtool.py" unpack "$HERE/saves/$n.ab" "$HERE/saves/$n"
     ;;
   restore)
