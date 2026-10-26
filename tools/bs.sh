@@ -80,6 +80,7 @@ case "${1:-}" in
     preserved=0
     if [ $wipe -eq 0 ] && $A $B shell pm path $PKG >/dev/null 2>&1; then
       echo "retaining current save (back up -> reinstall -> restore)..."
+      rm -rf "$HERE/saves/_preinstall" "$HERE/saves/_preinstall.ab"  # a stale copy must not pass the check below
       "$0" backup _preinstall >/dev/null 2>&1
       [ -f "$HERE/saves/_preinstall/apps/$PKG/f/save.dat" ] && preserved=1
       [ $preserved -eq 1 ] || { echo "  ERROR: could not back up current save; aborting before uninstall (unlock the device, or use --wipe to discard it)" >&2; exit 1; }
