@@ -82,8 +82,8 @@ case "${1:-}" in
       echo "retaining current save (back up -> reinstall -> restore)..."
       "$0" backup _preinstall >/dev/null 2>&1
       [ -f "$HERE/saves/_preinstall/apps/$PKG/f/save.dat" ] && preserved=1
-      [ $preserved -eq 1 ] && echo "  current progress saved" \
-        || echo "  WARNING: could not back up current save; continuing (use --wipe to silence)"
+      [ $preserved -eq 1 ] || { echo "  ERROR: could not back up current save; aborting before uninstall (unlock the device, or use --wipe to discard it)" >&2; exit 1; }
+      echo "  current progress saved"
     fi
     rm -rf "$WIN/apk"; mkdir -p "$WIN/apk"; cp "$d"/*.apk "$WIN/apk/"
     adb shell am force-stop $PKG; adb uninstall $PKG
