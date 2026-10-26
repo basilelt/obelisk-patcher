@@ -272,25 +272,25 @@ def patch_manifest_axml(axml_bytes):
     return bytes(data)
 
 
+def rezip(src_apk, dst_apk, replacements):
+    """Copy src_apk to dst_apk without old signatures, swapping in replacements {name: bytes}."""
+    os.makedirs(os.path.dirname(os.path.abspath(dst_apk)), exist_ok=True)
+    with zipfile.ZipFile(src_apk, "r") as zin, zipfile.ZipFile(dst_apk, "w") as zout:
+        for item in zin.infolist():
+            if item.filename.startswith("META-INF/"):
+                continue
+            data = replacements[item.filename] if item.filename in replacements else zin.read(item.filename)
+            ni = zipfile.ZipInfo(item.filename, date_time=item.date_time)
+            ni.compress_type = item.compress_type
+            ni.external_attr = item.external_attr
+            zout.writestr(ni, data)
+
+
 def patch_apk(src_apk, dst_apk):
     """Read src_apk, patch AndroidManifest.xml, drop old signatures, and write dst_apk."""
-    zin = zipfile.ZipFile(src_apk, "r")
-    manifest_bytes = zin.read("AndroidManifest.xml")
-    patched_manifest = patch_manifest_axml(manifest_bytes)
-
-    os.makedirs(os.path.dirname(os.path.abspath(dst_apk)), exist_ok=True)
-    zout = zipfile.ZipFile(dst_apk, "w")
-    for item in zin.infolist():
-        # Drop old signature files
-        if item.filename.startswith("META-INF/"):
-            continue
-        data = patched_manifest if item.filename == "AndroidManifest.xml" else zin.read(item.filename)
-        ni = zipfile.ZipInfo(item.filename, date_time=item.date_time)
-        ni.compress_type = item.compress_type
-        ni.external_attr = item.external_attr
-        zout.writestr(ni, data)
-    zout.close()
-    zin.close()
+    with zipfile.ZipFile(src_apk, "r") as zin:
+        manifest_bytes = zin.read("AndroidManifest.xml")
+    rezip(src_apk, dst_apk, {"AndroidManifest.xml": patch_manifest_axml(manifest_bytes)})
 
 
 def is_zip_file(path):

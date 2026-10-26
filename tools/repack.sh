@@ -21,6 +21,8 @@ command -v zipalign >/dev/null 2>&1 || { echo "Error: zipalign not found on PATH
 command -v apksigner >/dev/null 2>&1 || { echo "Error: apksigner not found on PATH" >&2; exit 1; }
 
 mkdir -p build/release build/patched
+# Never sign intermediates left over from a previous run
+rm -f build/base.unsigned.apk build/split_config.arm64_v8a.unsigned.apk
 
 # 1. Create debug keystore if missing
 if [ ! -f build/debug.keystore ]; then
@@ -37,17 +39,11 @@ python3 tools/patch_manifest.py input/base.apk build/base.unsigned.apk
 # 3. Repack arm64 split with patched libyoyo.so if present
 if [ -f build/patched/libyoyo.so ]; then
   echo "Repacking split_config.arm64_v8a with patched libyoyo.so..."
-  python3 - <<'PY'
-import zipfile
-src, dst = "input/split_config.arm64_v8a.apk", "build/split_config.arm64_v8a.unsigned.apk"
-zin = zipfile.ZipFile(src); zout = zipfile.ZipFile(dst, "w")
-for i in zin.infolist():
-    if i.filename.startswith("META-INF/"): continue
-    data = open("build/patched/libyoyo.so", "rb").read() if i.filename == "lib/arm64-v8a/libyoyo.so" else zin.read(i.filename)
-    ni = zipfile.ZipInfo(i.filename, date_time=i.date_time); ni.compress_type = i.compress_type; ni.external_attr = i.external_attr
-    zout.writestr(ni, data)
-zout.close()
-PY
+  python3 -c 'from tools.patch_manifest import rezip
+rezip("input/split_config.arm64_v8a.apk", "build/split_config.arm64_v8a.unsigned.apk",
+      {"lib/arm64-v8a/libyoyo.so": open("build/patched/libyoyo.so", "rb").read()})'
+else
+  echo "Warning: build/patched/libyoyo.so not found; shipping the stock arm64 split" >&2
 fi
 
 # 4. Align and sign all splits
