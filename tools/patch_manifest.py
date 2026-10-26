@@ -110,19 +110,22 @@ def add_string(data, sp, new_str):
     sp_pos = sp["pos"]
     str_start = sp["str_start"]
     style_start = sp["style_start"]
-    old_strings_len = (style_start if style_start else sp["size"]) - str_start
-    new_offsets = sp["offsets"] + [old_strings_len]
+    strings_end = style_start if style_start else sp["size"]
+    new_offsets = sp["offsets"] + [strings_end - str_start]
+    # Style offsets follow the string offsets and must be carried over unchanged
+    so_pos = sp_pos + sp["header_size"] + sp["str_count"] * 4
+    style_offsets = data[so_pos : so_pos + sp["style_count"] * 4]
 
-    new_str_start = sp["header_size"] + len(new_offsets) * 4 + sp["style_count"] * 4
-    old_strings = data[sp_pos + str_start : sp_pos + (style_start if style_start else sp["size"])]
-    new_strings = old_strings + bytes(enc)
+    new_str_start = sp["header_size"] + len(new_offsets) * 4 + len(style_offsets)
+    new_strings = data[sp_pos + str_start : sp_pos + strings_end] + bytes(enc)
+    new_strings += b"\x00" * (-len(new_strings) % 4)  # style data must start 4-aligned
     old_styles = data[sp_pos + style_start : sp_pos + sp["size"]] if style_start else b""
     new_style_start = new_str_start + len(new_strings) if style_start else 0
     total_data = new_strings + old_styles
     if len(total_data) % 4 != 0:
         total_data += b"\x00" * (4 - (len(total_data) % 4))
 
-    new_sp_size = sp["header_size"] + len(new_offsets) * 4 + sp["style_count"] * 4 + len(total_data)
+    new_sp_size = new_str_start + len(total_data)
     new_sp_header = struct.pack(
         "<HHIIIIII",
         sp["type"],
@@ -130,12 +133,12 @@ def add_string(data, sp, new_str):
         new_sp_size,
         len(new_offsets),
         sp["style_count"],
-        sp["flags"],
+        sp["flags"] & ~1,  # appended string breaks SORTED_FLAG order
         new_str_start,
         new_style_start,
     )
     new_offsets_bytes = struct.pack(f"<{len(new_offsets)}I", *new_offsets)
-    new_sp = new_sp_header + new_offsets_bytes + total_data
+    new_sp = new_sp_header + new_offsets_bytes + style_offsets + total_data
 
     new_data = data[:sp_pos] + new_sp + data[sp_pos + sp["size"] :]
     delta = len(new_sp) - sp["size"]
@@ -209,20 +212,20 @@ def patch_manifest_axml(axml_bytes):
             elem_name = sp["strings"][name] if name < len(sp["strings"]) else ""
             if elem_name == "application":
                 app_found = True
-                # Check if debuggable attribute is already present
+                # Check if android:debuggable is already present; the framework identifies
+                # it by resource ID, so tools:debuggable etc. don't count
                 existing_attr_idx = -1
                 for a in range(attr_count):
                     ap = pos + 16 + attr_start + a * attr_size
-                    ans, aname, araw, asize, ares0, atype, adata = struct.unpack_from("<IIIHBBI", data, ap)
-                    aname_str = sp["strings"][aname] if aname < len(sp["strings"]) else ""
-                    if aname == debug_str_idx or aname_str == "debuggable":
+                    ans, aname = struct.unpack_from("<II", data, ap)
+                    if ans == android_ns_idx and aname < len(res_ids) and res_ids[aname] == ATTR_DEBUGGABLE_RES_ID:
                         existing_attr_idx = a
                         break
 
                 if existing_attr_idx >= 0:
-                    # Update existing attribute in place
+                    # Update existing attribute in place: no raw string, typed boolean true
                     ap = pos + 16 + attr_start + existing_attr_idx * attr_size
-                    # Set dataType = TYPE_INT_BOOLEAN, data = BOOL_TRUE_VAL
+                    struct.pack_into("<I", data, ap + 8, 0xFFFFFFFF)
                     struct.pack_into("<B", data, ap + 15, TYPE_INT_BOOLEAN)
                     struct.pack_into("<I", data, ap + 16, BOOL_TRUE_VAL)
                     print(f"  Updated existing android:debuggable attribute to true at index {existing_attr_idx}")
@@ -254,6 +257,10 @@ def patch_manifest_axml(axml_bytes):
                     # Update application chunk header: chunk_size += len(new_attr), attr_count += 1
                     struct.pack_into("<I", data, pos + 4, chunk_size + len(new_attr))
                     struct.pack_into("<H", data, pos + 16 + 12, attr_count + 1)
+                    # id/class/style indices are 1-based attribute positions (0 = none)
+                    for off, idx in ((14, id_idx), (16, class_idx), (18, style_idx)):
+                        if idx > insert_idx:
+                            struct.pack_into("<H", data, pos + 16 + off, idx + 1)
                     print(f"  Inserted android:debuggable='true' attribute at index {insert_idx} in <application>")
                 break
         pos += chunk_size
